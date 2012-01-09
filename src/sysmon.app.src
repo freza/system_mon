@@ -1,0 +1,7 @@
+{application, system_mon,
+    [{description, "System monitoring library."},
+     {vsn, "0.0.1"},
+     {registered, [sysmon_log, sysmon_sup, sysmon_dif_sup]},
+     {mod, {sysmon_app, []}},
+     {applications, [kernel, stdlib, mnesia]}
+    ]}.
