@@ -42,8 +42,7 @@ start_link() ->
 
 -record(state, {
 	  name_tab, 		%% Cache preformatted CSV counter name rows. 		:: tid()
-	  update_tmr, 		%% Periodically log changed metrics. 			:: reference()
-	  last_ts 		%% Timestamp of last feed. 				:: now()
+	  update_tmr 		%% Periodically log changed metrics. 			:: reference()
 	 }).
 
 init([]) ->
@@ -51,7 +50,7 @@ init([]) ->
     {ok, _} = sysmon_dif_sup:add_worker(sysmon_log, ?MODULE),
     Name_tab = ets:new(anon, [set, public, {read_concurrency, true}]),
     Timer = schedule_update(),
-    {ok, #state{name_tab = Name_tab, update_tmr = Timer, last_ts = now()}}.
+    {ok, #state{name_tab = Name_tab, update_tmr = Timer}}.
 
 handle_call(_, _, State) ->
     {reply, {error, bad_request}, State}.
@@ -59,17 +58,11 @@ handle_call(_, _, State) ->
 handle_cast(_, State) ->
     {noreply, State}.
 
-handle_info({timeout, Ref, update}, #state{update_tmr = Ref, name_tab = Name_tab, last_ts = Last_ts} = State) ->
-    %% NB sysmon won't run multiple instances of the feed at once so we can't overload the node.
+handle_info({timeout, Ref, update}, #state{update_tmr = Ref, name_tab = Name_tab} = State) ->
+    %% NB sysmon won't run multiple instances of the feed at once as an overload protection measure.
     Log_ts = audit_log_lib:printable_date(calendar:local_time()),
-    Secs = timer:now_diff(Now = now(), Last_ts) div 1000000,
-    case sysmon_dif:start_feed(sysmon_log, [Name_tab, Log_ts, Secs]) of
-	ok ->
-	    Next_ts = Now;
-	_ ->
-	    Next_ts = Last_ts
-    end,
-    {noreply, State#state{update_tmr = schedule_update(), last_ts = Next_ts}};
+    sysmon_dif:start_feed(sysmon_log, [Name_tab, Log_ts]),
+    {noreply, State#state{update_tmr = schedule_update()}};
 handle_info(_, State) ->
     {noreply, State}.
 
@@ -93,12 +86,11 @@ schedule_update() ->
 
 -record(feed, {
 	  name_tab, 		%% Cache preformatted counter name columns. 		:: tid()
-	  log_ts, 		%% Quoted printable timestamp of this feed. 		:: iolist()
-	  secs 			%% Seconds since last run. 				:: integer()
+	  log_ts 		%% Quoted printable timestamp of this feed. 		:: iolist()
 	 }).
 
-start_feed([Name_tab, Log_ts, Secs]) ->
-    {ok, #feed{name_tab = Name_tab, log_ts = Log_ts, secs = Secs}}.
+start_feed([Name_tab, Log_ts]) ->
+    {ok, #feed{name_tab = Name_tab, log_ts = Log_ts}}.
 
 handle_create(counter, Key, [Cur_val], #feed{name_tab = Name_tab, log_ts = Log_ts}) ->
     Row = [Log_ts, $,, insert_name(Name_tab, Key), $,, integer_to_list(Cur_val), $\n],
@@ -106,19 +98,20 @@ handle_create(counter, Key, [Cur_val], #feed{name_tab = Name_tab, log_ts = Log_t
 handle_create(average, Key, [Cur_cnt, Cur_sum], #feed{name_tab = Name_tab, log_ts = Log_ts}) ->
     Row = [Log_ts, $,, insert_name(Name_tab, Key), $,, integer_to_list(round(Cur_sum / Cur_cnt)), $\n],
     audit_log:audit_msg(sysmon_avg, Row);
-handle_create(histogram, Key, Cur_vals, #feed{name_tab = Name_tab, log_ts = Log_ts}) ->
+handle_create(density, Key, Cur_vals, #feed{name_tab = Name_tab, log_ts = Log_ts}) ->
     Row = [Log_ts, $,, insert_name(Name_tab, Key), [[$,, integer_to_list(N)] || N <- Cur_vals], $\n],
     audit_log:audit_msg(sysmon_hst, Row).
 
-handle_update(counter, Key, [Cur_val], [Old_val], #feed{name_tab = Name_tab, log_ts = Log_ts, secs = Secs}) ->
-    Row = [Log_ts, $,, lookup_name(Name_tab, Key), $,, per_second(Cur_val, Old_val, Secs), $\n],
+handle_update(counter, Key, [Cur_val], [Old_val], #feed{name_tab = Name_tab, log_ts = Log_ts}) ->
+    Row = [Log_ts, $,, lookup_name(Name_tab, Key), $,, integer_to_list(Cur_val - Old_val), $\n],
     audit_log:audit_msg(sysmon_cnt, Row);
 handle_update(average, Key, [Cur_cnt, Cur_sum], [Old_cnt, Old_sum], #feed{name_tab = Name_tab, log_ts = Log_ts}) ->
-    Avg = round((Cur_sum - Old_sum) / (Cur_cnt - Old_cnt)),
-    Row = [Log_ts, $,, lookup_name(Name_tab, Key), $,, integer_to_list(round(Avg)), $\n],
+    Cnt = integer_to_list(Cur_cnt - Old_cnt),
+    Sum = integer_to_list(Cur_sum - Old_sum),
+    Row = [Log_ts, $,, lookup_name(Name_tab, Key), $,, Cnt, $,, Sum, $\n],
     audit_log:audit_msg(sysmon_avg, Row);
-handle_update(histogram, Key, Cur_vals, Old_vals, #feed{name_tab = Name_tab, log_ts = Log_ts, secs = Secs}) ->
-    Avg = lists:zipwith(fun (Cur, Old) -> [$,, per_second(Cur, Old, Secs)] end, Cur_vals, Old_vals),
+handle_update(density, Key, Cur_vals, Old_vals, #feed{name_tab = Name_tab, log_ts = Log_ts}) ->
+    Avg = lists:zipwith(fun (Cur, Old) -> [$,, integer_to_list(Cur - Old)] end, Cur_vals, Old_vals),
     Row = [Log_ts, $,, lookup_name(Name_tab, Key), Avg, $\n],
     audit_log:audit_msg(sysmon_hst, Row).
 
@@ -160,7 +153,3 @@ format_desc(Tab, Scope, Inst) ->
 q(Term) ->
     %% RFC4180-compatible quoting of double-quote characters.
     [$", re:replace(io_lib:format("~1000p", [Term]), [$"], [$", $"], [global]), $"].
-
-per_second(Cur, Old, Secs) ->
-    integer_to_list(round((Cur - Old) / Secs)).
-

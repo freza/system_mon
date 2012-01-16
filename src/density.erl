@@ -74,7 +74,7 @@ read_sel({Items, Cont}, Acc) ->
 read_sel('$end_of_table', Acc) ->
     Acc.
 
-update(Key, Idx, #density_conf{bin_cnt = Bins}) ->
+update(Key, Idx, #density_conf{cnt = Bins}) ->
     case update(Key, Idx) of
 	not_found ->
 	    %% Make space for implicit bins: underflow/overflow samples.
@@ -93,16 +93,27 @@ update(Key, Idx) ->
 	    not_found
     end.
 
-%% Row format is {Key, Underflow_bin, [... regular bins ...], Overflow_bin}.
-value_to_index(#density_conf{scale = lin, shift = Shift, param = Mult, bin_cnt = Bins}, Val) ->
-    select_bin(round((Val - Shift) / Mult), Bins);
-value_to_index(#density_conf{scale = log, shift = Shift, param = Base, bin_cnt = Bins}, Val) when Val >= 1 ->
-    select_bin(round(logarithm(Base, Val) - logarithm(Base, Shift)), Bins).
+%% Row format is {Key, Underflow_bin, [... Min_bin upto Max_bin ...], Overflow_bin}.
+value_to_index(X, #density_conf{scale = lin, slope = Mul, min = Min, max = Max, cnt = Cnt}) ->
+    1 + lin_bin(X, Mul, Min, Max, Cnt);
+value_to_index(X, #density_conf{scale = log, slope = Base, min = Min, max = Max, cnt = Cnt}) ->
+    1 + log_bin(X, Base, Min, Max, Cnt).
 
-%% Map zero-based relative index to actual column. Place out-of-range values to {under,over}flow bins.
-select_bin(N, _) when N < 0 ->
-    2;
-select_bin(N, C) when N >= C ->
-    C + 3;
-select_bin(N, _) ->
-    N + 3.
+%% Map value to histogram bin.
+lin_bin(Val, Mul, Min, Max, Cnt) ->
+    select_bin((Mul * Val), Min, Max, Cnt).
+
+log_bin(X, Base, Min, Max, Cnt) when X > 0 ->
+    select_bin(logarithm(Base, X), Min, Max, Cnt).
+
+%% First bin is for underflow events, last bin is for overflow events.
+select_bin(Y, Min, _, _) when Y < Min ->
+    1;
+select_bin(Y, _, Max, Cnt) when Y > Max ->
+    Cnt + 2;
+select_bin(Y, Min, Max, Cnt) ->
+    1 + scale(Y, Min, Max, Cnt).
+
+scale(Y, Min, Max, Cnt) ->
+    round(Cnt * (Y - Min)/(Max - Min)).
+

@@ -25,10 +25,12 @@
 
 -module(sysmon).
 
--export([add_counter/3, add_average/3, add_histogram/3]).
+-export([add_counter/3, add_average/3, add_linear/3, add_logarithmic/3]).
 -export([del_counter/2, del_average/2, del_histogram/2]).
 -export([create_db/0, create_db/1]).
 -export([behaviour_info/1]).
+
+-import(sysmon_lib, [get_value/2, get_value/3]).
 
 -include("sysmon_db.hrl").
 
@@ -51,9 +53,21 @@ add_counter(Tab, Inst, Opts) ->
 add_average(Tab, Inst, Opts) ->
     xxx.
 
-%% XXX histograms have nontrivial options, the rest just wants to define units... worth the hassle?
-add_histogram(Tab, Inst, Opts) ->
-    xxx.
+%% Linear histogram: [{mult, Num}, {min_y, Num}, {max_y, Num}, {count, N}].
+add_linear(Tab, Inst, Os) ->
+    Mul = get_value(mult, Os, 1),
+    Min = get_value(min_y, Os),
+    Max = get_value(max_y, Os),
+    Cnt = get_value(count, Os),
+    mnesia:dirty_write(#density_conf{key = {Tab, Inst}, scale = lin, slope = Mul, min = Min, max = Max, cnt = Cnt}).
+
+%% Logarithmic histogram: [{base, Num}, {min_exp, Num}, {max_exp, Num}, {count, N}].
+add_logarithmic(Tab, Inst, Os) ->
+    Log = get_value(base, Os, 10),
+    Min = get_value(min_exp, Os),
+    Max = get_value(max_exp, Os),
+    Cnt = get_value(count, Os),
+    mnesia:dirty_write(#density_conf{key = {Tab, Inst}, scale = log, slope = Log, min = Min, max = Max, cnt = Cnt}).
 
 del_counter(Tab, Inst) ->
     xxx.

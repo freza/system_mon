@@ -87,6 +87,7 @@ terminate(_, _) ->
 %%% Synthesis of application metrics: processes.
 
 pid_worker(Parent, Apps, Leaders) ->
+    %% XXX would be interesting to record latency histogram, maybe process size too
     [pid_write(Pid_stats) || Pid_stats <- pid_stats(Apps, Leaders)],
     done(Parent).
 
@@ -129,6 +130,7 @@ pid_info(Pid) ->
 %%% Synthesis of application metrics: ETS tables.
 
 tid_worker(Parent, Apps, Leaders) ->
+    %% XXX would be interesting to record latency histogram, maybe process size too
     [tid_write(Tid_stats) || Tid_stats <- tid_stats(Apps, Leaders)],
     done(Parent).
 

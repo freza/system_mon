@@ -78,7 +78,7 @@ handle_call({start_feed, Args}, _, #state{cnt = Cnt, avg = Avg, hst = Hst, worke
 	    Parent = self(),
 	    Cnt_pid = proc_lib:spawn_link(fun () -> worker(Parent, sysmon_cnt, Cnt, counter, Mod, Impl) end),
 	    Avg_pid = proc_lib:spawn_link(fun () -> worker(Parent, sysmon_avg, Avg, average, Mod, Impl) end),
-	    Hst_pid = proc_lib:spawn_link(fun () -> worker(Parent, sysmon_hst, Hst, histogram, Mod, Impl) end),
+	    Hst_pid = proc_lib:spawn_link(fun () -> worker(Parent, sysmon_hst, Hst, density, Mod, Impl) end),
 	    Workers2 = ordsets:from_list([Cnt_pid, Avg_pid, Hst_pid]),
 	    {reply, ok, State#state{workers = Workers2, impl = Impl, status = normal}};
 	_ ->
@@ -122,6 +122,8 @@ terminate(_, _) ->
 
 worker(Parent, Cur_tab, Aux_tab, Kind, Mod, Impl) ->
     try
+	%% XXX would be interesting to record latency histogram, maybe process size too
+	%%
         %% A = now(),
 	table_diff(Cur_tab, ets:first(Cur_tab), Aux_tab, ets:first(Aux_tab), Kind, Mod, Impl),
         %% B = now(),

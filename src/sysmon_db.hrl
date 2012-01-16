@@ -29,9 +29,10 @@
 -record(density_conf, {
 	  key, 				%% What are we defining? 			:: {Tab, Inst}.
 	  scale, 			%% Value scale. 				:: lin | log
-	  param, 			%% Multiplier or logarithm base. 		:: integer().
-	  shift, 			%% First bin centered around this value. 	:: number().
-	  bin_cnt 			%% Number of (non-implicit) bins. 		:: integer() > 0.
+	  slope, 			%% Multiplier or logarithm base. 		:: number().
+	  min, 				%% Y value of first bin. 			:: number().
+	  max, 				%% Y value of last bin. 			:: number().
+	  cnt 				%% Number of bins including Min and Max. 	:: integer() > 0.
 	 }).
 
 -endif.

@@ -25,7 +25,7 @@
 
 -module(sysmon_lib).
 
--export([get_env/3, get_value/3, logarithm/2, strip_key/1]).
+-export([get_env/3, get_value/2, get_value/3, logarithm/2, strip_key/1]).
 
 %%%
 
@@ -45,6 +45,15 @@ get_value(K, L, D) ->
 	    V;
 	false ->
 	    D
+    end.
+
+%% Return value of TVL item or explode if absent.
+get_value(K, L) ->
+    case lists:keysearch(K, 1, L) of
+	{value, {_, V}} ->
+	    V;
+	false ->
+	    exit({key_missing, K})
     end.
 
 %% Calculate arbitrary logarithm making use of the identity log_N(X) = log_M(X)/log_M(N).
