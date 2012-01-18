@@ -1,4 +1,4 @@
-%%% Copyright (c) 2011 Jachym Holecek <freza@circlewave.net>
+%%% Copyright (c) 2011-2012 Jachym Holecek <freza@circlewave.net>
 %%% All rights reserved.
 %%%
 %%% Redistribution and use in source and binary forms, with or without
@@ -23,25 +23,27 @@
 %%% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 %%% SUCH DAMAGE.
 
--module(sysmon_dif).
+-module(system_mon_dif).
 -behaviour(gen_server).
 
--export([start_link/2, start_feed/2, abort_feed/1]).
+-export([start_link/2, start_feed/2, abort_feed/1, set_owner/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--import(sysmon_lib, [strip_key/1]).
+-import(system_mon_lib, [strip_key/1]).
 
 %%%
 
 start_link(Feed, Mod) ->
-    %%% XXX pass owner pid, monitor, allow transfer, terminate when it exits.
-    gen_server:start_link({local, Feed}, ?MODULE, [Mod], []).
+    gen_server:start_link({local, Feed}, ?MODULE, [Mod, self()], []).
 
 start_feed(Feed, Args) ->
     gen_server:call(Feed, {start_feed, Args}).
 
 abort_feed(Feed) ->
     gen_server:call(Feed, abort_feed).
+
+set_owner(Feed, Pid) ->
+    gen_server:call(Feed, {set_owner, Pid}).
 
 %%%
 
@@ -60,25 +62,27 @@ worker_done(Pid) ->
 	  workers, 		%% Active workers. 				:: ordsets(pid())
 	  mod, 			%% Callback module. 				:: atom()
 	  impl, 		%% Callback state. 				:: term() | nil
-	  status 		%% Activity status. 				:: normal | failed | aborted
+	  status, 		%% Activity status. 				:: normal | failed | aborted
+	  owner 		%% Owner process. 				:: pid()
 	 }).
 
-init([Mod]) ->
+init([Mod, Owner]) ->
+    link(Owner),
     %% Shadow tables storing previous values.
     Aux_cnt = ets:new(anon, [ordered_set, public]),
     Aux_avg = ets:new(anon, [ordered_set, public]),
     Aux_hst = ets:new(anon, [ordered_set, public]),
     {ok, #state{cnt = Aux_cnt, avg = Aux_avg, hst = Aux_hst, workers = [],
-		mod = Mod, impl = nil, status = nil}}.
+		mod = Mod, impl = nil, status = nil, owner = Owner}}.
 
 handle_call({start_feed, Args}, _, #state{cnt = Cnt, avg = Avg, hst = Hst, workers = Workers, mod = Mod} = State) ->
     case Workers of
 	[] ->
 	    {ok, Impl} = Mod:start_feed(Args),
 	    Parent = self(),
-	    Cnt_pid = proc_lib:spawn_link(fun () -> worker(Parent, sysmon_cnt, Cnt, counter, Mod, Impl) end),
-	    Avg_pid = proc_lib:spawn_link(fun () -> worker(Parent, sysmon_avg, Avg, average, Mod, Impl) end),
-	    Hst_pid = proc_lib:spawn_link(fun () -> worker(Parent, sysmon_hst, Hst, density, Mod, Impl) end),
+	    Cnt_pid = proc_lib:spawn_link(fun () -> worker(Parent, system_mon_cnt, Cnt, counter, Mod, Impl) end),
+	    Avg_pid = proc_lib:spawn_link(fun () -> worker(Parent, system_mon_avg, Avg, average, Mod, Impl) end),
+	    Hst_pid = proc_lib:spawn_link(fun () -> worker(Parent, system_mon_hst, Hst, density, Mod, Impl) end),
 	    Workers2 = ordsets:from_list([Cnt_pid, Avg_pid, Hst_pid]),
 	    {reply, ok, State#state{workers = Workers2, impl = Impl, status = normal}};
 	_ ->
@@ -103,6 +107,15 @@ handle_call({worker_done, Pid}, _, #state{workers = Workers, mod = Mod, impl = I
 handle_call(worker_crash, _, #state{workers = Workers} = State) ->
     [(catch Worker ! worker_stop) || Worker <- Workers],
     {reply, ok, State#state{status = failed}};
+handle_call({set_owner, New}, _, #state{owner = Old} = State) ->
+    %% NB ordered so that we're always linked to someone.
+    if New /= Old ->
+	    link(New),
+	    unlink(Old);
+       true ->
+	    ok
+    end,
+    {reply, ok, State#state{owner = New}};
 handle_call(_, _, State) ->
     {reply, {error, bad_request}, State}.
 
@@ -122,13 +135,10 @@ terminate(_, _) ->
 
 worker(Parent, Cur_tab, Aux_tab, Kind, Mod, Impl) ->
     try
-	%% XXX would be interesting to record latency histogram, maybe process size too
-	%%
-        %% A = now(),
+	Begin_ts = now(),
 	table_diff(Cur_tab, ets:first(Cur_tab), Aux_tab, ets:first(Aux_tab), Kind, Mod, Impl),
-        %% B = now(),
-        %% io:format("~s ==> Feed ~s took ~wms.~n", [audit_log_lib:printable_date(),
-        %%     Cur_tab, timer:now_diff(B, A) div 1000]),
+	Finish_ts = now(),
+	density:rec({system_mon, {Kind, Mod}, duration}, timer:now_diff(Finish_ts, Begin_ts) / 1000000),
 	worker_done(Parent)
     catch
 	throw : {callback_crash, Exn, Rsn, Stack} ->

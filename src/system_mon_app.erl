@@ -1,4 +1,4 @@
-%%% Copyright (c) 2011 Jachym Holecek <freza@circlewave.net>
+%%% Copyright (c) 2011-2012 Jachym Holecek <freza@circlewave.net>
 %%% All rights reserved.
 %%%
 %%% Redistribution and use in source and binary forms, with or without
@@ -23,43 +23,37 @@
 %%% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 %%% SUCH DAMAGE.
 
--module(sysmon_lib).
+-module(system_mon_app).
+-behaviour(application).
 
--export([get_env/3, get_value/2, get_value/3, logarithm/2, strip_key/1]).
+-export([start/2, stop/1]).
+
+-import(lists, [member/2]).
 
 %%%
 
-%% Abstract away application evironment and also offer saner interface.
-get_env(A, K, D) ->
-    case application:get_env(A, K) of
-	{ok, V} ->
-	    V;
-	_ ->
-	    D
-    end.
+start(_, _) ->
+    setup_db(),
+    audit_log:rediscover_logs(system_mon),
+    system_mon:rediscover_stats(system_mon),
+    system_mon_sup:start_link().
 
-%% Return value of TVL item or default if absent.
-get_value(K, L, D) ->
-    case lists:keysearch(K, 1, L) of
-	{value, {_, V}} ->
-	    V;
-	false ->
-	    D
-    end.
+stop(_) ->
+    ok.
 
-%% Return value of TVL item or explode if absent.
-get_value(K, L) ->
-    case lists:keysearch(K, 1, L) of
-	{value, {_, V}} ->
-	    V;
-	false ->
-	    exit({key_missing, K})
-    end.
+%%%
 
-%% Calculate arbitrary logarithm making use of the identity log_N(X) = log_M(X)/log_M(N).
-logarithm(Base, Value) ->
-    math:log(Value) / math:log(Base).
-
-%% Return row as a list without leading key element.
-strip_key(Row) ->
-    tl(tuple_to_list(Row)).
+setup_db() ->
+    try mnesia:table_info(density_conf, disc_copies) of
+        Nodes ->
+            case member(node(), Nodes) of
+                false ->
+                    {atomic, ok} = mnesia:add_table_copy(density_conf, node(), disc_copies);
+                _ ->
+                    ok
+            end
+    catch
+        exit : {aborted, {no_exists, _, _}} ->
+            {atomic, ok} = system_mon:create_db()
+    end,
+    ok = mnesia:wait_for_tables([density_conf], 10000).

@@ -1,4 +1,4 @@
-%%% Copyright (c) 2011 Jachym Holecek <freza@circlewave.net>
+%%% Copyright (c) 2011-2012 Jachym Holecek <freza@circlewave.net>
 %%% All rights reserved.
 %%%
 %%% Redistribution and use in source and binary forms, with or without
@@ -25,16 +25,16 @@
 
 -module(density).
 
--export([rec/2, del/1, read/1, read_all/0, read_all/1, read_sel/1]).
+-export([rec/2, del/1, read/1, read_all/0, match/1]).
 
 -import(lists, [foldl/3]).
--import(sysmon_lib, [logarithm/2, strip_key/1]).
+-import(system_mon_lib, [logarithm/2, strip_key/1]).
 
--include("sysmon_db.hrl").
+-include("system_mon_db.hrl").
 
 %%% Histograms are predefined event bins stored in single ETS row. Otherwise similar to event counters.
 
-rec({Tab, _, Inst} = Key, Val) when is_integer(Val), Val >= 0 ->
+rec({Tab, _, Inst} = Key, Val) when is_number(Val) ->
     case ets:lookup(density_conf, {Tab, Inst}) of
 	[Conf] ->
 	    update(Key, value_to_index(Val, Conf), Conf);
@@ -43,10 +43,10 @@ rec({Tab, _, Inst} = Key, Val) when is_integer(Val), Val >= 0 ->
     end.
 
 del({_, _, _} = Key) ->
-    ets:delete(sysmon_hst, Key).
+    ets:delete(system_mon_hst, Key).
 
 read({_, _, _} = Key) ->
-    case ets:lookup(sysmon_hst, Key) of
+    case ets:lookup(system_mon_hst, Key) of
 	[Item] ->
 	    {ok, strip_key(Item)};
 	[] ->
@@ -54,31 +54,30 @@ read({_, _, _} = Key) ->
     end.
 
 read_all() ->
-    read_sel({'_', '_', '_'}).
+    match({'_', '_', '_'}).
 
-read_all(Tab) ->
-    read_sel({Tab, '_', '_'}).
-
-read_sel(Head) ->
-    ets:safe_fixtable(sysmon_avg, true),
+match(Head) ->
+    ets:safe_fixtable(system_mon_hst, true),
     try
-	read_sel(ets:select(sysmon_avg, [{{Head, '_', '_'}, [], ['$_']}], 100), [])
+	%% XXX how to make select work when rows have arbitrary arities???
+	%% XXX it's ordered_set, we probably need first/next...
+	match(ets:select(system_mon_hst, [{{Head, '_', '_'}, [], ['$_']}], 100), [])
     after
-	ets:safe_fixtable(sysmon_avg, false)
+	ets:safe_fixtable(system_mon_hst, false)
     end.
 
 %%%
 
-read_sel({Items, Cont}, Acc) ->
-    read_sel(ets:select(Cont), foldl(fun (X, A) -> [{element(1, X), strip_key(X)} | A] end, Acc, Items));
-read_sel('$end_of_table', Acc) ->
+match({Items, Cont}, Acc) ->
+    match(ets:select(Cont), foldl(fun (X, A) -> [{element(1, X), strip_key(X)} | A] end, Acc, Items));
+match('$end_of_table', Acc) ->
     Acc.
 
 update(Key, Idx, #density_conf{cnt = Bins}) ->
     case update(Key, Idx) of
 	not_found ->
 	    %% Make space for implicit bins: underflow/overflow samples.
-	    ets:insert_new(sysmon_hst, list_to_tuple([Key | lists:duplicate(Bins + 2, 0)])),
+	    ets:insert_new(system_mon_hst, list_to_tuple([Key | lists:duplicate(Bins + 2, 0)])),
 	    update(Key, Idx);
 	_ ->
 	    ok
@@ -86,7 +85,7 @@ update(Key, Idx, #density_conf{cnt = Bins}) ->
 
 update(Key, Idx) ->
     try
-	ets:update_counter(sysmon_hst, Key, {Idx, 1}),
+	ets:update_counter(system_mon_hst, Key, {Idx, 1}),
 	ok
     catch
 	error : badarg ->

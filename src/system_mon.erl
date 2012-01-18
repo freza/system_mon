@@ -1,4 +1,4 @@
-%%% Copyright (c) 2011 Jachym Holecek <freza@circlewave.net>
+%%% Copyright (c) 2011-2012 Jachym Holecek <freza@circlewave.net>
 %%% All rights reserved.
 %%%
 %%% Redistribution and use in source and binary forms, with or without
@@ -23,18 +23,17 @@
 %%% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 %%% SUCH DAMAGE.
 
--module(sysmon).
+-module(system_mon).
 
--export([add_counter/3, add_average/3, add_linear/3, add_logarithmic/3]).
--export([del_counter/2, del_average/2, del_histogram/2]).
+-export([add_density/2]).
 -export([create_db/0, create_db/1]).
 -export([behaviour_info/1]).
 
--import(sysmon_lib, [get_value/2, get_value/3]).
+-import(system_mon_lib, [get_value/2, get_value/3]).
 
--include("sysmon_db.hrl").
+-include("system_mon_db.hrl").
 
-%%% Interface for sysmon_feed callbacks.
+%%% Interface for system_mon_dif callbacks.
 
 behaviour_info(callbacks) ->
     [{start_feed, 1}, 		%% Mod:start_feed(Args) -> {ok, Impl}
@@ -47,11 +46,22 @@ behaviour_info(_) ->
 
 %%% Management interface.
 
-add_counter(Tab, Inst, Opts) ->
-    xxx.
+add_density({Tab, '_', Inst}, Opts) ->
+    case get_value(scale, Opts) of
+	lin ->
+	    add_linear(Tab, Inst, Opts);
+	log ->
+	    add_logarithmic(Tab, Inst, Opts)
+    end.
 
-add_average(Tab, Inst, Opts) ->
-    xxx.
+create_db() ->
+    create_db([{disc_copies, [node()]}, {local_content, true}]).
+
+create_db(Opts) ->
+    mnesia:create_table(density_conf, [{attributes, record_info(fields, density_conf)},
+				       {type, set} | Opts]).
+
+%%% Implementation.
 
 %% Linear histogram: [{mult, Num}, {min_y, Num}, {max_y, Num}, {count, N}].
 add_linear(Tab, Inst, Os) ->
@@ -69,20 +79,36 @@ add_logarithmic(Tab, Inst, Os) ->
     Cnt = get_value(count, Os),
     mnesia:dirty_write(#density_conf{key = {Tab, Inst}, scale = log, slope = Log, min = Min, max = Max, cnt = Cnt}).
 
-del_counter(Tab, Inst) ->
-    xxx.
-
-del_average(Tab, Inst) ->
-    xxx.
-
-del_histogram(Tab, Inst) ->
-    xxx.
-
-%%% System interface. Normally not needed, but allow creating configuration table manually.
-
-create_db() ->
-    create_db([{disc_copies, [node()]}, {local_content, true}]).
-
-create_db(Opts) ->
-    mnesia:create_table(density_conf, [{attributes, record_info(fields, density_conf)},
-                                         {type, set} | Opts]).
+%% XXXtodo Want a safe way to ensure all stats config from *.app is loaded.
+%%
+%% Ensure all stats mentioned in *.app files of loaded applications are provisioned in Mnesia.
+%% scan_all_stats() ->
+%%     [scan_app_stats(App) || {App, _, _} <- application:loaded_applications()],
+%%     ok.
+%% 
+%% scan_app_stats(App) ->
+%%     [edit_hst(Name, Opts) || {Name, Opts} <- get_value(density, get_key(App, system_mon, []), [])],
+%%     ok.
+%% 
+%% get_key(App, Key, Def) ->
+%%     case application:get_key(App, Key) of
+%% 	{ok, Val} ->
+%% 	    Val;
+%% 	undefined ->
+%% 	    Def
+%%     end.
+%% 
+%% edit_hst(Tab, Inst, Scale, Slope, Min, Max, Cnt, Do_force) ->
+%%     case mnesia:dirty_read(density_conf, {Tab, Inst}) of
+%% 	[#density_conf{}] when Do_force == false ->
+%% 	    %% Just ensuring existence.
+%% 	    ok;
+%% 	[#density_conf{scale = Scale, slope = Slope, min = Min, max = Max, cnt = Cnt}] ->
+%% 	    %% No change.
+%% 	    ok;
+%% 	[#density_conf{}] when Do_force == true ->
+%% 	    %% XXX remove 
+%% 	    %% XXX destroy existing instances.
+%% 	    mnesia:write(#density_conf{});
+%% 		  [] ->
+%% 

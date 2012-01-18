@@ -1,4 +1,4 @@
-%%% Copyright (c) 2011 Jachym Holecek <freza@circlewave.net>
+%%% Copyright (c) 2011-2012 Jachym Holecek <freza@circlewave.net>
 %%% All rights reserved.
 %%%
 %%% Redistribution and use in source and binary forms, with or without
@@ -23,31 +23,16 @@
 %%% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 %%% SUCH DAMAGE.
 
--module(sysmon_dif_sup).
--vsn(' $Id: audit_log_disk_sup.erl 20123 2011-07-08 17:19:04Z jachym $ ').
--behaviour(supervisor).
+-ifndef(SYSTEM_MON_DB_HRL).
+-define(SYSTEM_MON_DB_HRL, included).
 
--export([start_link/0, add_worker/2, del_worker/1]).
--export([init/1]).
+-record(density_conf, {
+	  key, 				%% What are we defining? 			:: {Tab, Inst}.
+	  scale, 			%% Value scale. 				:: lin | log
+	  slope, 			%% Multiplier or logarithm base. 		:: number().
+	  min, 				%% Y value of first bin. 			:: number().
+	  max, 				%% Y value of last bin. 			:: number().
+	  cnt 				%% Number of bins including Min and Max. 	:: integer() > 0.
+	 }).
 
-%%% Public interface.
-
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-add_worker(Name, Mod) ->
-    supervisor:start_child(?MODULE, child(Name, Mod)).
-
-del_worker(Name) ->
-    supervisor:terminate_child(?MODULE, Name),
-    supervisor:delete_child(?MODULE, Name).
-
-%%% Supervisor callbacks.
-
-init([]) ->
-    {ok, {{one_for_one, 10, 5000}, []}}.
-
-%%% Implementation.
-
-child(Name, Mod) ->
-    {Name, {sysmon_dif, start_link, [Name, Mod]}, transient, 60000, worker, [sysmon_dif]}.
+-endif.

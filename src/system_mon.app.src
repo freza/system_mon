@@ -1,7 +1,15 @@
 {application, system_mon,
-    [{description, "Lightweight system monitoring library."},
+    [{description, "Lightweight System Monitoring Application."},
      {vsn, "0.0.1"},
-     {registered, [sysmon_log, sysmon_sup, sysmon_dif_sup]},
+     {registered, [system_mon_log, system_mon_sup, system_mon_dif_sup]},
      {mod, {sysmon_app, []}},
-     {applications, [kernel, stdlib, mnesia]}
+     {applications, [kernel, stdlib, mnesia]},
+     {audit_log,
+      [{counter_log, [{with_node, true}, {suffix, "csv"}]},
+       {average_log, [{with_node, true}, {suffix, "csv"}]},
+       {density_log, [{with_node, true}, {suffix, "csv"}]}
+      ]},
+     {system_mon,
+      [{density,
+	[{{system_mon, '_', duration}, [{scale, log}, {base, 10}, {min_exp, -6}, {max_exp, 2}, {count, 8}]}]}]}
     ]}.

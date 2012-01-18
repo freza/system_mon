@@ -1,4 +1,4 @@
-%%% Copyright (c) 2011 Jachym Holecek <freza@circlewave.net>
+%%% Copyright (c) 2011-2012 Jachym Holecek <freza@circlewave.net>
 %%% All rights reserved.
 %%%
 %%% Redistribution and use in source and binary forms, with or without
@@ -25,7 +25,7 @@
 
 -module(counter).
 
--export([inc/1, inc/2, set/2, del/1, read/1, read_all/0, read_all/1, read_sel/1]).
+-export([inc/1, inc/2, set/2, del/1, read/1, read_all/0, match/1]).
 
 %%% Event counters are integer values not decreasing in time.
 
@@ -33,24 +33,24 @@ inc(Key) ->
     inc(Key, 1).
 
 inc({_, _, _} = Key, Inc) when is_integer(Inc), Inc >= 0 ->
-    try ets:update_counter(sysmon_cnt, Key, Inc) catch
+    try ets:update_counter(system_mon_cnt, Key, Inc) catch
 	error : badarg ->
-	    case ets:insert_new(sysmon_cnt, {Key, Inc}) of
+	    case ets:insert_new(system_mon_cnt, {Key, Inc}) of
 		false ->
-		    ets:update_counter(sysmon_cnt, Key, Inc);
+		    ets:update_counter(system_mon_cnt, Key, Inc);
 		_ ->
 		    Inc
 	    end
     end.
 
 set({_, _, _} = Key, Val) when is_integer(Val), Val >= 0 ->
-    ets:insert(sysmon_cnt, {Key, Val}).
+    ets:insert(system_mon_cnt, {Key, Val}).
 
 del({_, _, _} = Key) ->
-    ets:delete(sysmon_cnt, Key).
+    ets:delete(system_mon_cnt, Key).
 
 read({_, _, _} = Key) ->
-    case ets:lookup(sysmon_cnt, Key) of
+    case ets:lookup(system_mon_cnt, Key) of
 	[Item] ->
 	    {ok, Item};
 	[] ->
@@ -58,15 +58,12 @@ read({_, _, _} = Key) ->
     end.
 
 read_all() ->
-    read_sel({'_', '_'}).
+    match({'_', '_'}).
 
-read_all(Tab) ->
-    read_sel({Tab, '_', '_'}).
-
-read_sel(Head) ->
-    ets:safe_fixtable(sysmon_avg, true),
+match(Head) ->
+    ets:safe_fixtable(system_mon_cnt, true),
     try
-	ets:select(sysmon_cnt, [{{Head, '_'}, [], ['$_']}])
+	ets:select(system_mon_cnt, [{{Head, '_'}, [], ['$_']}])
     after
-	ets:safe_fixtable(sysmon_avg, false)
+	ets:safe_fixtable(system_mon_cnt, false)
     end.

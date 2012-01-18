@@ -1,4 +1,4 @@
-%%% Copyright (c) 2011 Jachym Holecek <freza@circlewave.net>
+%%% Copyright (c) 2011-2012 Jachym Holecek <freza@circlewave.net>
 %%% All rights reserved.
 %%%
 %%% Redistribution and use in source and binary forms, with or without
@@ -23,7 +23,7 @@
 %%% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 %%% SUCH DAMAGE.
 
--module(sysmon_sys).
+-module(system_mon_sys).
 -vsn(' $Id$ ').
 -url(' $URL$ ').
 -behaviour(gen_server).
@@ -31,7 +31,7 @@
 -export([start_link/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--import(sysmon_lib, [get_env/3, get_value/3]).
+-import(system_mon_lib, [get_env/3, get_value/3]).
 -import(lists, [foldl/3, usort/1]).
 
 %%%
@@ -87,8 +87,10 @@ terminate(_, _) ->
 %%% Synthesis of application metrics: processes.
 
 pid_worker(Parent, Apps, Leaders) ->
-    %% XXX would be interesting to record latency histogram, maybe process size too
+    Begin_ts = now(),
     [pid_write(Pid_stats) || Pid_stats <- pid_stats(Apps, Leaders)],
+    Finish_ts = now(),
+    density:rec({system_mon, pid_synth, duration}, timer:now_diff(Finish_ts, Begin_ts) / 1000000),
     done(Parent).
 
 pid_write({App, {Count, Memory, Mqueue}}) ->
@@ -130,8 +132,10 @@ pid_info(Pid) ->
 %%% Synthesis of application metrics: ETS tables.
 
 tid_worker(Parent, Apps, Leaders) ->
-    %% XXX would be interesting to record latency histogram, maybe process size too
+    Begin_ts = now(),
     [tid_write(Tid_stats) || Tid_stats <- tid_stats(Apps, Leaders)],
+    Finish_ts = now(),
+    density:rec({system_mon, tid_synth, duration}, timer:now_diff(Finish_ts, Begin_ts) / 1000000),
     done(Parent).
 
 tid_write({App, {Count, Items, Memory}}) ->
@@ -198,7 +202,7 @@ erts_cnt() ->
     counter:set({erts, system, port_rx}, Ior),
     counter:set({erts, system, port_tx}, Iow),
     counter:set({erts, system, gc_count}, Gc_cnt),
-    counter:set({erts, system, gc_freed}, Gc_freed),
+    counter:set({erts, system, gc_freed}, words_to_bytes(Gc_freed)),
     counter:set({erts, system, reductions}, Reds),
     counter:set({erts, system, proc_sched}, Context_sw).
 
@@ -250,7 +254,7 @@ host_load() ->
 %%% Implementation.
 
 schedule_update() ->
-    erlang:start_timer(get_env(sysmon, systat_period, 300) * 1000, self(), update).
+    erlang:start_timer(get_env(system_mon, sys_period, 300) * 1000, self(), update).
 
 mnesia_info(Key) ->
     try mnesia:system_info(Key) catch
